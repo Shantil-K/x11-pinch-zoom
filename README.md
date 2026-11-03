@@ -25,6 +25,18 @@ Based on [firefox-multi-touch-zoom](https://github.com/haxiomic/firefox-multi-to
 
 On X11, Chrome and Opera don't receive touchpad pinch gestures themselves, so something has to pass them on. There are two ways to do it. Both need the [Touchégg](https://github.com/JoseExposito/touchegg) daemon running (`touchegg --daemon`, normally started by the system). Only use one at a time; `switch-method.sh` switches between them.
 
+### Quick install
+
+```bash
+git clone https://github.com/bmarwane/chrome-multi-touch-zoom.git
+cd chrome-multi-touch-zoom
+./install.sh
+```
+
+`install.sh` checks for Touchégg and `python3-gi`, registers the pinch helper with Chrome, Chromium, Brave, Opera and Opera GX, and selects the continuous pinch method. Then load the `extension` folder as an unpacked extension (see [Installation](#installation)) and reload your tabs. Keep the folder where it is: the browser runs the helper from it, and the extension ID depends on the path (run `./install.sh` again if you move it).
+
+The sections below explain what it sets up and how to do it by hand.
+
 ### Native helper (recommended, continuous)
 
 A small helper ([`native-host/pinch_host.py`](native-host/pinch_host.py)) listens to the gestures that the Touchégg daemon broadcasts over D-Bus and sends the exact pinch amount to the extension through Chrome's native messaging. The zoom follows your fingers continuously, including reversing mid-pinch. It needs no sudo and no `input` group.
