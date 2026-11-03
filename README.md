@@ -28,7 +28,7 @@ On X11, Chrome and Opera don't receive touchpad pinch gestures themselves, so so
 ### Quick install
 
 ```bash
-git clone https://github.com/bmarwane/chrome-multi-touch-zoom.git
+git clone https://github.com/Shantil-K/chrome-multi-touch-zoom.git
 cd chrome-multi-touch-zoom
 ./install.sh
 ```
@@ -106,7 +106,7 @@ The script swaps `~/.config/touchegg/touchegg.conf` (backing up the old one as `
 
 1. Clone this repository or download the ZIP:
    ```bash
-   git clone https://github.com/bmarwane/chrome-multi-touch-zoom.git
+   git clone https://github.com/Shantil-K/chrome-multi-touch-zoom.git
    ```
 2. Open Google Chrome and navigate to `chrome://extensions/`
 3. Enable **Developer mode** using the toggle switch in the top-right corner.
