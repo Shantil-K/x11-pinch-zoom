@@ -150,6 +150,39 @@ function cancelSmoothZoom() {
   targetScale = null;
 }
 
+// Continuous pinch from the native helper (see native-host/), relayed by background.js
+let pinchStartScale = 1;
+let pinchX = 0;
+let pinchY = 0;
+let pinchLatest = null;
+let pinchFrame = null;
+
+function applyPinchFrame() {
+  pinchFrame = null;
+  if (pinchLatest == null) return;
+  // the speed slider bends the response: 0.7 (default) = follow fingers 1:1
+  let target = pinchStartScale * Math.pow(pinchLatest, pinchZoomSpeed / 0.7);
+  pinchLatest = null;
+  applyScale(target / pageScale, pinchX, pinchY);
+}
+
+if (chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg || !msg.mtzoomPinch) return;
+    if (msg.mtzoomPinch === 'begin') {
+      cancelSmoothZoom();
+      pinchStartScale = pageScale;
+      let scrollBox = getScrollBoxElement();
+      pinchX = (mouseX != null ? mouseX : window.innerWidth / 2) - (scrollBox.offsetLeft || 0);
+      pinchY = (mouseY != null ? mouseY : window.innerHeight / 2) - (scrollBox.offsetTop || 0);
+    }
+    pinchLatest = msg.s;
+    // apply at most once per frame; the helper sends ~140 updates/s
+    if (pinchFrame == null) pinchFrame = requestAnimationFrame(applyPinchFrame);
+  });
+  try { chrome.runtime.sendMessage({ mtzoomWake: true }).catch(() => {}); } catch (e) {}
+}
+
 // cmd + 0 or ctrl + 0 to restore zoom, or Ctrl + Alt + ArrowUp/ArrowDown for Touchegg
 window.addEventListener('keydown', (e) => {
   if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
