@@ -1,22 +1,10 @@
 /**
-EDITED FOR THE PURPOSE OF USING WITH CHROME ON LINUX
-ONLY SHIFT+SCROLL FUNCTIONALITY IMPLEMENTED
-
-Multi-touch zoom extension for Firefox
-Enables smooth pinch to zoom on desktop
-
-Requires Firefox 55 or greater
-
-@Author: George Corney / haxiomic
-@Website: http://github.com/haxiomic
-@Email: haxiomic@gmail.com
-
-Please report issues to the github repository
-	https://github.com/haxiomic/firefox-multi-touch-zoom
-
-Feel free to get in touch via email if you have any questions
-
-**/
+ * Multi-touch Zoom Extension for Google Chrome (Manifest V3)
+ * Enables smooth pinch-to-zoom, Shift + scroll zooming, and Touchégg key zooming on desktop.
+ *
+ * Originally based on haxiomic/firefox-multi-touch-zoom
+ * Adapted for modern Google Chrome with Manifest V3 support.
+ */
 
 // view scaling parameters and other options
 const scaleMode = 1; // 0 = always high quality, 1 = low-quality while zooming
@@ -27,12 +15,13 @@ const overflowTimeout_ms = 400;
 const highQualityWait_ms = 40;
 const alwaysHighQuality = false;
 
-let horizontalOriginShift = 0; // > 0 to the right,  < 0 to the left
-let verticalOriginShift = 0; // > 0 down, < 0 up
-let originMoveRate = 10;
+let horizontalOriginShift = 0; // > 0 to the right, < 0 to the left
+let verticalOriginShift = 0;   // > 0 down, < 0 up
 
-// settings
-let shiftKeyZoom = true; // enable zoom with shift + scroll by default
+// settings (with defaults)
+let shiftKeyZoom = true;
+let ctrlKeyZoom = false;
+let keyZoomEnabled = true;
 let pinchZoomSpeed = 0.7;
 let disableScrollbarsWhenZooming = false;
 
@@ -43,302 +32,400 @@ let translationY = 0;
 let overflowTranslationX = 0;
 let overflowTranslationY = 0;
 
-// elements
-let pageElement = document.documentElement;
-let wheelEventElement = document.documentElement;
-let scrollEventElement = window;
-
-const quirksMode = document.compatMode === 'BackCompat';
-
-function getScrollBoxElement() {
+function getPageElement() {
   return document.documentElement || document.body;
 }
 
+function getScrollBoxElement() {
+  return document.scrollingElement || document.documentElement || document.body || {
+    offsetLeft: 0,
+    offsetTop: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+    scrollWidth: window.innerWidth,
+    scrollHeight: window.innerHeight,
+    clientWidth: window.innerWidth,
+    clientHeight: window.innerHeight
+  };
+}
+
 // apply user settings
-chrome.storage.local.get([
-	'mtzoom_shiftkey',
-	'mtzoom_speed',
-	'mtzoom_disableScrollbarsWhenZooming',
-], function (res) {
-	if (res.mtzoom_shiftkey != null) {
-		shiftKeyZoom = res.mtzoom_shiftkey;
-	}
-	if (res.mtzoom_speed != null) {
-		pinchZoomSpeed = res.mtzoom_speed;
-	}
-	if (res.mtzoom_disableScrollbarsWhenZooming != null) {
-		disableScrollbarsWhenZooming = res.mtzoom_disableScrollbarsWhenZooming;
-	}
+chrome.storage.local.get({
+  mtzoom_shiftkey: true,
+  mtzoom_ctrlkey: false,
+  mtzoom_keyzoom: true,
+  mtzoom_speed: 0.7,
+  mtzoom_disableScrollbarsWhenZooming: false
+}, function (res) {
+  if (chrome.runtime.lastError) return;
+  if (res.mtzoom_shiftkey != null) shiftKeyZoom = res.mtzoom_shiftkey;
+  if (res.mtzoom_ctrlkey != null) ctrlKeyZoom = res.mtzoom_ctrlkey;
+  if (res.mtzoom_keyzoom != null) keyZoomEnabled = res.mtzoom_keyzoom;
+  if (res.mtzoom_speed != null) pinchZoomSpeed = parseFloat(res.mtzoom_speed);
+  if (res.mtzoom_disableScrollbarsWhenZooming != null) disableScrollbarsWhenZooming = res.mtzoom_disableScrollbarsWhenZooming;
 });
 
-// browser-hint optimization - I found this causes issues with some sites like maps.google.com
-// pageElement.style.willChange = 'transform';
+// listen for live setting updates from popup/options
+if (chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      if (changes.mtzoom_shiftkey !== undefined) shiftKeyZoom = changes.mtzoom_shiftkey.newValue;
+      if (changes.mtzoom_ctrlkey !== undefined) ctrlKeyZoom = changes.mtzoom_ctrlkey.newValue;
+      if (changes.mtzoom_keyzoom !== undefined) keyZoomEnabled = changes.mtzoom_keyzoom.newValue;
+      if (changes.mtzoom_speed !== undefined) pinchZoomSpeed = parseFloat(changes.mtzoom_speed.newValue);
+      if (changes.mtzoom_disableScrollbarsWhenZooming !== undefined) disableScrollbarsWhenZooming = changes.mtzoom_disableScrollbarsWhenZooming.newValue;
+    }
+  });
+}
 
-
-let mouseX, mouseY;
+let mouseX = window.innerWidth / 2;
+let mouseY = window.innerHeight / 2;
 let shoudFollowMouse = false;
 let canFollowMouse = false;
 
+window.addEventListener('mousemove', (e) => {
+  if (!canFollowMouse) {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+    return;
+  }
 
-document.onmousemove = (e) => {
-  if(!canFollowMouse) return;
-  if (shoudFollowMouse && mouseX && mouseY) {
-    //window.scrollBy(e.clientX - mouseX, e.clientY - mouseY);
-    horizontalOriginShift+= e.clientX - mouseX;
-    verticalOriginShift+= e.clientY - mouseY;
+  if (shoudFollowMouse && mouseX != null && mouseY != null) {
+    horizontalOriginShift += e.clientX - mouseX;
+    verticalOriginShift += e.clientY - mouseY;
 
-    pageElement.style.setProperty('transform-origin', `${horizontalOriginShift}px ${verticalOriginShift}px`, 'important');
+    let el = getPageElement();
+    if (el) {
+      el.style.setProperty('transform-origin', `${horizontalOriginShift}px ${verticalOriginShift}px`, 'important');
+    }
   }
 
   // Store current position
   mouseX = e.clientX;
   mouseY = e.clientY;
-};
+}, { capture: true, passive: true });
 
+function zoomByKeyboard(direction) {
+  let scrollBox = getScrollBoxElement();
+  let x = (mouseX != null ? mouseX : window.innerWidth / 2) - (scrollBox.offsetLeft || 0);
+  let y = (mouseY != null ? mouseY : window.innerHeight / 2) - (scrollBox.offsetTop || 0);
 
-// cmd + 0 or ctrl + 0 to restore zoom
-window.addEventListener('keydown', (e) => {
-	if (e.key == '0' && e.ctrlKey) {
-		resetScale();
+  // Zoom step derived from pinchZoomSpeed (~8% step at default speed 0.7)
+  let step = 1 + (0.08 * (pinchZoomSpeed / 0.7));
+  let scaleBy = direction > 0 ? step : (1 / step);
+
+  smoothZoom(scaleBy, x, y);
+}
+
+// Discrete inputs (mouse-wheel notches, xdotool clicks, key presses) arrive as big jumps.
+// Instead of snapping, glide toward the target scale over a few frames.
+let targetScale = null;
+let smoothX = 0;
+let smoothY = 0;
+let smoothFrame = null;
+
+function smoothZoom(scaleBy, x, y) {
+  let base = targetScale != null ? targetScale : pageScale;
+  targetScale = Math.min(Math.max(base * scaleBy, minScale), maxScale);
+  smoothX = x;
+  smoothY = y;
+  if (smoothFrame == null) smoothFrame = requestAnimationFrame(smoothZoomStep);
+}
+
+function smoothZoomStep() {
+  let remaining = targetScale / pageScale;
+  if (Math.abs(remaining - 1) < 0.002) {
+    applyScale(remaining, smoothX, smoothY);
+    cancelSmoothZoom();
     return;
-	}
+  }
+  // cover ~30% of the remaining zoom each frame (ease-out)
+  applyScale(Math.pow(remaining, 0.3), smoothX, smoothY);
+  smoothFrame = requestAnimationFrame(smoothZoomStep);
+}
+
+function cancelSmoothZoom() {
+  if (smoothFrame != null) cancelAnimationFrame(smoothFrame);
+  smoothFrame = null;
+  targetScale = null;
+}
+
+// cmd + 0 or ctrl + 0 to restore zoom, or Ctrl + Alt + ArrowUp/ArrowDown for Touchegg
+window.addEventListener('keydown', (e) => {
+  if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
+    resetScale();
+    e.preventDefault();
+    return;
+  }
+
+  // Touchegg / keyboard shortcuts: Ctrl + Alt + ArrowUp/Equal (zoom in), Ctrl + Alt + ArrowDown/Minus (zoom out)
+  if (keyZoomEnabled && (e.ctrlKey || e.metaKey) && e.altKey) {
+    if (e.key === 'ArrowUp' || e.key === 'Up' || e.key === '=' || e.key === '+') {
+      zoomByKeyboard(1);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    } else if (e.key === 'ArrowDown' || e.key === 'Down' || e.key === '-' || e.key === '_') {
+      zoomByKeyboard(-1);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+  }
 
   shoudFollowMouse = !!e.shiftKey;
-});
+}, { capture: true });
 
 window.addEventListener('keyup', (e) => {
   shoudFollowMouse = !!e.shiftKey;
-});
+}, { capture: true });
 
 // because scroll top/left are handled as integers only, we only read the translation from scroll once scroll has changed
-// if we didn't, our translation would have ugly precision issues => setTranslationX(4.5) -> translationX = 4
 let ignoredScrollLeft = null;
 let ignoredScrollTop = null;
-function updateTranslationFromScroll(){
-	if (getScrollBoxElement().scrollLeft !== ignoredScrollLeft) {
-		translationX = -getScrollBoxElement().scrollLeft;
-		ignoredScrollLeft = null;
-	}
-	if (getScrollBoxElement().scrollTop !== ignoredScrollTop) {
-		translationY = -getScrollBoxElement().scrollTop;
-		ignoredScrollTop = null;
-	}
+function updateTranslationFromScroll() {
+  let scrollBox = getScrollBoxElement();
+  if (scrollBox.scrollLeft !== ignoredScrollLeft) {
+    translationX = -scrollBox.scrollLeft;
+    ignoredScrollLeft = null;
+  }
+  if (scrollBox.scrollTop !== ignoredScrollTop) {
+    translationY = -scrollBox.scrollTop;
+    ignoredScrollTop = null;
+  }
 }
-// https://github.com/rochal/jQuery-slimScroll/issues/316
-scrollEventElement.addEventListener(`scroll`, updateTranslationFromScroll, { capture: false, passive: false });
 
-wheelEventElement.addEventListener(`wheel`, (e) => {
-	if (e.shiftKey && shiftKeyZoom) {
-		if (e.defaultPrevented) return;
+window.addEventListener('scroll', updateTranslationFromScroll, { capture: false, passive: true });
 
-		let x = e.clientX - getScrollBoxElement().offsetLeft;
-		let y = e.clientY - getScrollBoxElement().offsetTop;
-		// x in non-scrolling, non-transformed coordinates relative to the scrollBoxElement
-		// 0 is always the left side and <width> is always the right side
+window.addEventListener('wheel', (e) => {
+  const isShiftZoom = shiftKeyZoom && e.shiftKey;
+  const isCtrlZoom = ctrlKeyZoom && (e.ctrlKey || e.metaKey);
 
-		let deltaMultiplier = pinchZoomSpeed * zoomSpeedMultiplier;
+  if (isShiftZoom || isCtrlZoom) {
+    let scrollBox = getScrollBoxElement();
+    let x = e.clientX - (scrollBox.offsetLeft || 0);
+    let y = e.clientY - (scrollBox.offsetTop || 0);
 
-		let newScale = pageScale + e.deltaY * deltaMultiplier;
-		let scaleBy = pageScale/newScale;
+    let deltaMultiplier = pinchZoomSpeed * zoomSpeedMultiplier;
 
-		applyScale(scaleBy, x, y, false);
+    // Chromium turns Shift + wheel into horizontal scroll, so deltaY can be 0
+    let delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+    // Notches from a mouse wheel / xdotool are large; touchpad deltas are small and continuous
+    let isDiscrete = e.deltaMode !== 0 || Math.abs(delta) >= 40;
+    let base = isDiscrete && targetScale != null ? targetScale : pageScale;
 
-		e.preventDefault();
-		e.stopPropagation();
-	} else {
-		// e.preventDefault();
-		restoreControl();
-	}
-}, { capture: false, passive: false });
+    let newScale = base + delta * deltaMultiplier;
+    if (newScale < 0.1) newScale = 0.1;
+    let scaleBy = base / newScale;
 
-getScrollBoxElement().addEventListener(`mousemove`, restoreControl);
-getScrollBoxElement().addEventListener(`mousedown`, restoreControl);
+    if (isDiscrete) {
+      smoothZoom(scaleBy, x, y);
+    } else {
+      cancelSmoothZoom();
+      applyScale(scaleBy, x, y);
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+  } else {
+    restoreControl();
+  }
+}, { capture: true, passive: false });
+
+window.addEventListener('mousedown', restoreControl, { capture: true, passive: true });
 
 let controlDisabled = false;
 function disableControl() {
-	if (controlDisabled) return;
+  if (controlDisabled) return;
 
-	if (disableScrollbarsWhenZooming) {
-		let verticalScrollBarWidth = window.innerWidth - pageElement.clientWidth;
-		let horizontalScrollBarWidth = window.innerHeight - pageElement.clientHeight;
+  let pageEl = getPageElement();
+  if (disableScrollbarsWhenZooming && pageEl) {
+    let verticalScrollBarWidth = window.innerWidth - pageEl.clientWidth;
+    let horizontalScrollBarWidth = window.innerHeight - pageEl.clientHeight;
 
-		// disable scrolling for performance
-		pageElement.style.setProperty('overflow', 'hidden', 'important');
+    pageEl.style.setProperty('overflow', 'hidden', 'important');
+    pageEl.style.setProperty('margin-right', verticalScrollBarWidth + 'px', 'important');
+    pageEl.style.setProperty('margin-bottom', horizontalScrollBarWidth + 'px', 'important');
+  }
 
-		// since we're disabling a scrollbar we need to apply a margin to replicate the offset (if any) it introduced
-		// this prevent the page from being shifted about as the scrollbar is hidden and shown
-		pageElement.style.setProperty('margin-right', verticalScrollBarWidth + 'px', 'important');
-		pageElement.style.setProperty('margin-bottom', horizontalScrollBarWidth + 'px', 'important');
-	}
-
-	// document.body.style.pointerEvents = 'none';
-	controlDisabled = true;
+  controlDisabled = true;
 }
 
 function restoreControl() {
-	if (!controlDisabled) return;
-	// scrolling must be enabled for panning
-	pageElement.style.overflow = 'auto';
-	pageElement.style.marginRight = '';
-	pageElement.style.marginBottom = '';
-	// document.body.style.pointerEvents = '';
-	controlDisabled = false;
+  if (!controlDisabled) return;
+
+  let pageEl = getPageElement();
+  if (pageEl) {
+    pageEl.style.overflow = 'auto';
+    pageEl.style.marginRight = '';
+    pageEl.style.marginBottom = '';
+  }
+  controlDisabled = false;
 }
 
 let qualityTimeoutHandle = null;
 let overflowTimeoutHandle = null;
 
 function updateTransform(scaleModeOverride, shouldDisableControl) {
-	if (shouldDisableControl == null) {
-		shouldDisableControl = true;
-	}
+  if (shouldDisableControl == null) {
+    shouldDisableControl = true;
+  }
 
-	let sm = scaleModeOverride == null ? scaleMode : scaleModeOverride;
+  let pageEl = getPageElement();
+  if (!pageEl) return;
 
-	if (sm === 0 || alwaysHighQuality) {
-		// scaleX/scaleY
-		pageElement.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
-	} else {
-		// perspective (reduced quality but faster)
-		let p = 1; // what's the best value here?
-		let z = p - p/pageScale;
+  let sm = scaleModeOverride == null ? scaleMode : scaleModeOverride;
 
-		pageElement.style.setProperty('transform', `perspective(${p}px) translateZ(${z}px)`, 'important');
+  if (sm === 0 || alwaysHighQuality) {
+    pageEl.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
+  } else {
+    let p = 1;
+    let z = p - p / pageScale;
 
-		// wait a short period before restoring the quality
-		// we use a timeout for trackpad because we can't detect when the user has finished the gesture on the hardware
-		// we can only detect gesture update events ('wheel' + ctrl)
-        window.clearTimeout(qualityTimeoutHandle);
-        qualityTimeoutHandle = setTimeout(function(){
-        pageElement.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
-        }, highQualityWait_ms);
-	}
+    pageEl.style.setProperty('transform', `perspective(${p}px) translateZ(${z}px)`, 'important');
 
-	pageElement.style.setProperty('transform-origin', `${horizontalOriginShift}px ${verticalOriginShift}px`, 'important');
+    window.clearTimeout(qualityTimeoutHandle);
+    qualityTimeoutHandle = setTimeout(function () {
+      let el = getPageElement();
+      if (el) {
+        el.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
+      }
+    }, highQualityWait_ms);
+  }
 
-	// hack to restore normal behavior that's upset after applying the transform
-	pageElement.style.position = `relative`;
-	pageElement.style.height = `100%`;
+  pageEl.style.setProperty('transform-origin', `${horizontalOriginShift}px ${verticalOriginShift}px`, 'important');
 
-	// when translation is positive, the offset is applied via left/top positioning
-	// negative translation is applied via scroll
-	if (minScale < 1) {
-		pageElement.style.setProperty('left', `${Math.max(translationX, 0) - overflowTranslationX}px`, 'important');
-		pageElement.style.setProperty('top', `${Math.max(translationY, 0) - overflowTranslationY}px`, 'important');
-	}
+  pageEl.style.position = 'relative';
+  pageEl.style.height = '100%';
 
-	// weird performance hack - is it batching the changes?
-	pageElement.style.transitionProperty = `transform, left, top`;
-	pageElement.style.transitionDuration = `0s`;
+  if (minScale < 1) {
+    pageEl.style.setProperty('left', `${Math.max(translationX, 0) - overflowTranslationX}px`, 'important');
+    pageEl.style.setProperty('top', `${Math.max(translationY, 0) - overflowTranslationY}px`, 'important');
+  }
 
-	if (shouldDisableControl) {
-		disableControl();
-		clearTimeout(overflowTimeoutHandle);
-		overflowTimeoutHandle = setTimeout(function(){
-			restoreControl();
-		}, overflowTimeout_ms);
-	}
+  pageEl.style.transitionProperty = 'transform, left, top';
+  pageEl.style.transitionDuration = '0s';
+
+  if (shouldDisableControl) {
+    disableControl();
+    clearTimeout(overflowTimeoutHandle);
+    overflowTimeoutHandle = setTimeout(function () {
+      restoreControl();
+    }, overflowTimeout_ms);
+  }
 }
 
 function applyScale(scaleBy, x_scrollBoxElement, y_scrollBoxElement) {
-	// x/y coordinates in untransformed coordinates relative to the scroll container
-	// if the container is the window, then the coordinates are relative to the window
-	// ignoring any scroll offset. The coordinates do not change as the page is transformed
+  let scrollBox = getScrollBoxElement();
 
-	function getTranslationX(){ return translationX; }
-	function getTranslationY(){ return translationY; }
-	function setTranslationX(v) {
-		// clamp v to scroll range
-		// this limits minScale to 1
-		v = Math.min(v, 0);
-		v = Math.max(v, -(getScrollBoxElement().scrollWidth - getScrollBoxElement().clientWidth));
+  function getTranslationX() { return translationX; }
+  function getTranslationY() { return translationY; }
 
-		translationX = v;
+  function setTranslationX(v) {
+    let maxScrollX = scrollBox.scrollWidth - scrollBox.clientWidth;
+    v = Math.min(v, 0);
+    v = Math.max(v, -maxScrollX);
 
-		getScrollBoxElement().scrollLeft = Math.max(-v, 0);
-		ignoredScrollLeft = getScrollBoxElement().scrollLeft;
+    translationX = v;
 
-		// scroll-transform what we're unable to apply
-		// either there is no scroll-bar or we want to scroll past the end
-		overflowTranslationX = v < 0 ? Math.max((-v) - (getScrollBoxElement().scrollWidth - getScrollBoxElement().clientWidth), 0) : 0;
-	}
-	function setTranslationY(v) {
-		// clamp v to scroll range
-		// this limits minScale to 1
-		v = Math.min(v, 0);
-		v = Math.max(v, -(getScrollBoxElement().scrollHeight - getScrollBoxElement().clientHeight));
+    scrollBox.scrollLeft = Math.max(-v, 0);
+    ignoredScrollLeft = scrollBox.scrollLeft;
 
-		translationY = v;
+    overflowTranslationX = v < 0 ? Math.max((-v) - maxScrollX, 0) : 0;
+  }
 
-		getScrollBoxElement().scrollTop = Math.max(-v, 0);
-		ignoredScrollTop = getScrollBoxElement().scrollTop;
+  function setTranslationY(v) {
+    let maxScrollY = scrollBox.scrollHeight - scrollBox.clientHeight;
+    v = Math.min(v, 0);
+    v = Math.max(v, -maxScrollY);
 
-		overflowTranslationY = v < 0 ? Math.max((-v) - (getScrollBoxElement().scrollHeight - getScrollBoxElement().clientHeight), 0) : 0;
-	}
+    translationY = v;
 
-	// resize pageElement
-	let pageScaleBefore = pageScale;
-	pageScale *= scaleBy;
-	pageScale = Math.min(Math.max(pageScale, minScale), maxScale);
-	let effectiveScale = pageScale/pageScaleBefore;
+    scrollBox.scrollTop = Math.max(-v, 0);
+    ignoredScrollTop = scrollBox.scrollTop;
 
-  if(pageScale === 1) {
+    overflowTranslationY = v < 0 ? Math.max((-v) - maxScrollY, 0) : 0;
+  }
+
+  let pageScaleBefore = pageScale;
+  pageScale *= scaleBy;
+  pageScale = Math.min(Math.max(pageScale, minScale), maxScale);
+  let effectiveScale = pageScale / pageScaleBefore;
+
+  if (pageScale === 1) {
     canFollowMouse = false;
+    horizontalOriginShift = 0;
+    verticalOriginShift = 0;
   } else {
     canFollowMouse = true;
   }
 
-  if(pageScale === 1 && (horizontalOriginShift || verticalOriginShift)) {
-    horizontalOriginShift = 0;
-    verticalOriginShift = 0;
-  }
+  if (effectiveScale === 1) return;
 
-	// when we hit min/max scale we can early exit
-	if (effectiveScale === 1) return;
+  updateTransform(null, null);
 
-	updateTransform(null, null);
+  let zx = x_scrollBoxElement;
+  let zy = y_scrollBoxElement;
 
-    //zx and zy are the absolute coordinates of the mouse on the screen
-	let zx = x_scrollBoxElement;
-	let zy = y_scrollBoxElement;
+  let tx = getTranslationX();
+  tx = (tx - zx) * effectiveScale + zx;
 
-	// calculate new xy-translation
-	let tx = getTranslationX();
-	tx = (tx - zx) * (effectiveScale) + zx;
+  let ty = getTranslationY();
+  ty = (ty - zy) * effectiveScale + zy;
 
-	let ty = getTranslationY();
-	ty = (ty - zy) * (effectiveScale) + zy;
+  setTranslationX(tx);
+  setTranslationY(ty);
 
-	// apply new xy-translation
-	setTranslationX(tx);
-	setTranslationY(ty);
-
-	updateTransform(null, null);
+  updateTransform(null, null);
 }
 
 function resetScale() {
-	// reset state
-	pageScale = 1;
-	translationX = 0;
-	translationY = 0;
-	overflowTranslationX = 0;
-	overflowTranslationY = 0;
+  cancelSmoothZoom();
+  pageScale = 1;
+  translationX = 0;
+  translationY = 0;
+  overflowTranslationX = 0;
+  overflowTranslationY = 0;
   horizontalOriginShift = 0;
   verticalOriginShift = 0;
+  canFollowMouse = false;
+  shoudFollowMouse = false;
 
-	let scrollLeftBefore = getScrollBoxElement().scrollLeft;
-	let scrollLeftMaxBefore = getScrollBoxElement().scrollMax;
-	let scrollTopBefore = getScrollBoxElement().scrollTop;
-	let scrollTopMaxBefore = (getScrollBoxElement().scrollHeight - getScrollBoxElement().clientHeight);
-	updateTransform(0, false, false);
+  let scrollBox = getScrollBoxElement();
+  let scrollLeftBefore = scrollBox.scrollLeft;
+  let scrollLeftMaxBefore = scrollBox.scrollWidth - scrollBox.clientWidth;
+  let scrollTopBefore = scrollBox.scrollTop;
+  let scrollTopMaxBefore = scrollBox.scrollHeight - scrollBox.clientHeight;
 
-	// restore scroll
-	getScrollBoxElement().scrollLeft = (scrollLeftBefore/scrollLeftMaxBefore) * (getScrollBoxElement().scrollWidth - getScrollBoxElement().clientWidth);
-	getScrollBoxElement().scrollTop = (scrollTopBefore/scrollTopMaxBefore) * (getScrollBoxElement().scrollHeight - getScrollBoxElement().clientHeight);
+  updateTransform(0, false);
 
-	updateTranslationFromScroll();
+  if (scrollLeftMaxBefore > 0) {
+    scrollBox.scrollLeft = (scrollLeftBefore / scrollLeftMaxBefore) * (scrollBox.scrollWidth - scrollBox.clientWidth);
+  } else {
+    scrollBox.scrollLeft = 0;
+  }
 
-	// undo other css changes
-	pageElement.style.overflow = '';
-	// document.body.style.pointerEvents = '';
+  if (scrollTopMaxBefore > 0) {
+    scrollBox.scrollTop = (scrollTopBefore / scrollTopMaxBefore) * (scrollBox.scrollHeight - scrollBox.clientHeight);
+  } else {
+    scrollBox.scrollTop = 0;
+  }
+
+  updateTranslationFromScroll();
+
+  let pageEl = getPageElement();
+  if (pageEl) {
+    pageEl.style.removeProperty('transform');
+    pageEl.style.removeProperty('transform-origin');
+    pageEl.style.removeProperty('position');
+    pageEl.style.removeProperty('height');
+    pageEl.style.removeProperty('left');
+    pageEl.style.removeProperty('top');
+    pageEl.style.removeProperty('transition-property');
+    pageEl.style.removeProperty('transition-duration');
+    pageEl.style.removeProperty('overflow');
+    pageEl.style.removeProperty('margin-right');
+    pageEl.style.removeProperty('margin-bottom');
+  }
+  controlDisabled = false;
 }

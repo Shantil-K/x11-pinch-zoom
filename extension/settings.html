@@ -1,35 +1,253 @@
 <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Multi-touch Zoom Settings</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #1f2937;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --card-bg: #f9fafb;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --kbd-bg: #e5e7eb;
+      --kbd-text: #374151;
+    }
 
-<html>
-	<head>
-		<meta content="text/html;charset=utf-8" http-equiv="Content-Type">
-		<meta content="utf-8" http-equiv="encoding">
-		<style>
-			label {
-				font-weight: bold;
-			}
-		</style>
-	</head>
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1f2937;
+        --text: #f9fafb;
+        --text-muted: #9ca3af;
+        --border: #374151;
+        --card-bg: #111827;
+        --accent: #3b82f6;
+        --accent-hover: #60a5fa;
+        --kbd-bg: #374151;
+        --kbd-text: #e5e7eb;
+      }
+    }
 
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      color: var(--text);
+      background-color: var(--bg);
+      padding: 16px;
+      width: 350px;
+      line-height: 1.4;
+      user-select: none;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header img {
+      width: 28px;
+      height: 28px;
+    }
+
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .header .version {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .section {
+      margin-bottom: 16px;
+    }
+
+    .setting-item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 0;
+      cursor: pointer;
+    }
+
+    .setting-item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--accent);
+      cursor: pointer;
+      margin-top: 2px;
+    }
+
+    .setting-text {
+      flex: 1;
+    }
+
+    .setting-title {
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .setting-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .slider-item {
+      padding: 8px 0;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .slider-header .value {
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .slider-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .guide-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+    }
+
+    .guide-title {
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+
+    .guide-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .guide-item:last-child {
+      margin-bottom: 0;
+    }
+
+    kbd {
+      background: var(--kbd-bg);
+      color: var(--kbd-text);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
 <body>
-	<form>
-		<p>
-			<label>Enable SHIFT+scroll</label>
-			<input type="checkbox" id="mtzoom_shiftkey">
-		</p>
-		<p>
-			<div>
-				<label>Disable scrollbars when zooming</label>
-				<input type="checkbox" id="mtzoom_disableScrollbarsWhenZooming">
-			</div>
-			<i>Performance optimization for older versions of Firefox, turning this off can improve usability</i>
-		</p>
-		<p>
-			<label>Zoom Speed</label>
-			<input type="range" id="mtzoom_speed" min="0" max="10" step="1">
-		</p>
-	</form>
-	<script src="settings.js"></script>
-</body>
+  <div class="header">
+    <img src="icons/icon-48.png" alt="Multi-touch Zoom Logo">
+    <h1>Multi-touch Zoom</h1>
+    <span class="version">v1.0.0</span>
+  </div>
 
+  <div class="section">
+    <label class="setting-item" for="mtzoom_keyzoom">
+      <div class="setting-text">
+        <div class="setting-title">Touchégg pinch keys (Ctrl + Alt + Up/Down)</div>
+        <div class="setting-desc">Lag-free native key zoom for Touchégg pinch gestures</div>
+      </div>
+      <input type="checkbox" id="mtzoom_keyzoom">
+    </label>
+
+    <label class="setting-item" for="mtzoom_shiftkey">
+      <div class="setting-text">
+        <div class="setting-title">Enable SHIFT + scroll zoom</div>
+        <div class="setting-desc">Hold Shift while scrolling to zoom</div>
+      </div>
+      <input type="checkbox" id="mtzoom_shiftkey">
+    </label>
+
+    <label class="setting-item" for="mtzoom_ctrlkey">
+      <div class="setting-text">
+        <div class="setting-title">Enable CTRL / Touchpad pinch</div>
+        <div class="setting-desc">Use touchpad pinch gesture or Ctrl+scroll</div>
+      </div>
+      <input type="checkbox" id="mtzoom_ctrlkey">
+    </label>
+
+    <label class="setting-item" for="mtzoom_disableScrollbarsWhenZooming">
+      <div class="setting-text">
+        <div class="setting-title">Hide scrollbars when zooming</div>
+        <div class="setting-desc">Hides scrollbars during active zoom</div>
+      </div>
+      <input type="checkbox" id="mtzoom_disableScrollbarsWhenZooming">
+    </label>
+
+    <div class="slider-item">
+      <div class="slider-header">
+        <span class="setting-title">Zoom Speed</span>
+        <span class="value" id="speed_value">0.7x</span>
+      </div>
+      <input type="range" id="mtzoom_speed" min="0.1" max="3.0" step="0.1" value="0.7">
+      <div class="slider-labels">
+        <span>Slower (0.1x)</span>
+        <span>Faster (3.0x)</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="guide-card">
+    <div class="guide-title">Supported Inputs:</div>
+    <div class="guide-item">
+      <span>🤏</span>
+      <span><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> (Touchégg pinch)</span>
+    </div>
+    <div class="guide-item">
+      <span>🔍</span>
+      <span><kbd>Shift</kbd> + <strong>Scroll</strong> to zoom in / out</span>
+    </div>
+    <div class="guide-item">
+      <span>✋</span>
+      <span><kbd>Shift</kbd> + <strong>Move mouse</strong> to pan viewport</span>
+    </div>
+    <div class="guide-item">
+      <span>🔄</span>
+      <span><kbd>Ctrl</kbd> + <kbd>0</kbd> to reset zoom</span>
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
 </html>
