@@ -24,6 +24,8 @@ let ctrlKeyZoom = false;
 let keyZoomEnabled = true;
 let pinchZoomSpeed = 0.7;
 let disableScrollbarsWhenZooming = false;
+let shortcutIn = MTZ_DEFAULT_SHORTCUTS.in;   // from shortcuts.js
+let shortcutOut = MTZ_DEFAULT_SHORTCUTS.out;
 
 // state
 let pageScale = 1;
@@ -55,7 +57,9 @@ chrome.storage.local.get({
   mtzoom_ctrlkey: false,
   mtzoom_keyzoom: true,
   mtzoom_speed: 0.7,
-  mtzoom_disableScrollbarsWhenZooming: false
+  mtzoom_disableScrollbarsWhenZooming: false,
+  mtzoom_shortcut_in: MTZ_DEFAULT_SHORTCUTS.in,
+  mtzoom_shortcut_out: MTZ_DEFAULT_SHORTCUTS.out
 }, function (res) {
   if (chrome.runtime.lastError) return;
   if (res.mtzoom_shiftkey != null) shiftKeyZoom = res.mtzoom_shiftkey;
@@ -63,6 +67,8 @@ chrome.storage.local.get({
   if (res.mtzoom_keyzoom != null) keyZoomEnabled = res.mtzoom_keyzoom;
   if (res.mtzoom_speed != null) pinchZoomSpeed = parseFloat(res.mtzoom_speed);
   if (res.mtzoom_disableScrollbarsWhenZooming != null) disableScrollbarsWhenZooming = res.mtzoom_disableScrollbarsWhenZooming;
+  if (res.mtzoom_shortcut_in) shortcutIn = res.mtzoom_shortcut_in;
+  if (res.mtzoom_shortcut_out) shortcutOut = res.mtzoom_shortcut_out;
 });
 
 // listen for live setting updates from popup/options
@@ -74,6 +80,8 @@ if (chrome.storage && chrome.storage.onChanged) {
       if (changes.mtzoom_keyzoom !== undefined) keyZoomEnabled = changes.mtzoom_keyzoom.newValue;
       if (changes.mtzoom_speed !== undefined) pinchZoomSpeed = parseFloat(changes.mtzoom_speed.newValue);
       if (changes.mtzoom_disableScrollbarsWhenZooming !== undefined) disableScrollbarsWhenZooming = changes.mtzoom_disableScrollbarsWhenZooming.newValue;
+      if (changes.mtzoom_shortcut_in !== undefined) shortcutIn = changes.mtzoom_shortcut_in.newValue || MTZ_DEFAULT_SHORTCUTS.in;
+      if (changes.mtzoom_shortcut_out !== undefined) shortcutOut = changes.mtzoom_shortcut_out.newValue || MTZ_DEFAULT_SHORTCUTS.out;
     }
   });
 }
@@ -191,15 +199,11 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Touchegg / keyboard shortcuts: Ctrl + Alt + ArrowUp/Equal (zoom in), Ctrl + Alt + ArrowDown/Minus (zoom out)
-  if (keyZoomEnabled && (e.ctrlKey || e.metaKey) && e.altKey) {
-    if (e.key === 'ArrowUp' || e.key === 'Up' || e.key === '=' || e.key === '+') {
-      zoomByKeyboard(1);
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    } else if (e.key === 'ArrowDown' || e.key === 'Down' || e.key === '-' || e.key === '_') {
-      zoomByKeyboard(-1);
+  // Zoom shortcuts (default Ctrl + Alt + Up/Down), also what Touchégg sends for pinch
+  if (keyZoomEnabled) {
+    let dir = mtzMatches(shortcutIn, e) ? 1 : mtzMatches(shortcutOut, e) ? -1 : 0;
+    if (dir) {
+      zoomByKeyboard(dir);
       e.preventDefault();
       e.stopPropagation();
       return;

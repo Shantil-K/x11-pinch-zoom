@@ -1,6 +1,8 @@
 // Connects to the optional native pinch helper (native-host/) and forwards
 // touchpad pinch gestures to the active tab of the focused browser window.
 
+importScripts('shortcuts.js');
+
 const HOST_NAME = 'com.multitouchzoom.pinch';
 
 let port = null;
@@ -18,6 +20,7 @@ function connect() {
   port.onDisconnect.addListener(() => {
     void chrome.runtime.lastError; // helper not installed, or it exited
     port = null;
+    pendingKeyReplies.splice(0).forEach((r) => r({ ok: false, reason: 'no-helper' }));
     scheduleReconnect();
   });
 }
@@ -36,9 +39,37 @@ async function findTargetTab() {
   return tab ? tab.id : null;
 }
 
+// ---- Zoom shortcuts -> Touchégg config, written by the helper ----
+let pendingKeyReplies = [];
+
+function storedToucheggKeys() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get({ mtzoom_shortcut_in: null, mtzoom_shortcut_out: null }, (res) => {
+      if (!res.mtzoom_shortcut_in || !res.mtzoom_shortcut_out) return resolve(null); // defaults: nothing to sync
+      resolve({ in: mtzToTouchegg(res.mtzoom_shortcut_in), out: mtzToTouchegg(res.mtzoom_shortcut_out) });
+    });
+  });
+}
+
+function sendKeysToHost(keys, reply) {
+  if (!port) {
+    if (reply) reply({ ok: false, reason: 'no-helper' });
+    return;
+  }
+  if (reply) pendingKeyReplies.push(reply);
+  port.postMessage({ t: 'setKeys', in: keys.in, out: keys.out });
+}
+
 function onHostMessage(msg) {
   if (msg.t === 'ready') {
     retryDelay = 1000;
+    // keep Touchégg in sync with the saved shortcuts whenever the helper starts
+    storedToucheggKeys().then((keys) => { if (keys) sendKeysToHost(keys); });
+    return;
+  }
+  if (msg.t === 'keysSaved' || msg.t === 'keysError') {
+    const reply = pendingKeyReplies.shift();
+    if (reply) reply({ ok: msg.t === 'keysSaved', active: !!msg.active, error: msg.msg });
     return;
   }
   if (msg.t !== 'begin' && msg.t !== 'update' && msg.t !== 'end') return;
@@ -53,8 +84,13 @@ function onHostMessage(msg) {
 }
 
 // Pages ping on load so a sleeping service worker wakes up and reconnects
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.mtzoomWake && !port) connect();
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg) return;
+  if (msg.mtzoomWake && !port) connect();
+  if (msg.mtzoomSetKeys) {
+    sendKeysToHost(msg.mtzoomSetKeys, sendResponse);
+    return true; // reply comes later, from the helper
+  }
 });
 
 connect();

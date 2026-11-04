@@ -23,6 +23,7 @@
         "<all_urls>"
       ],
       "js": [
+        "shortcuts.js",
         "pinch-zoom.js"
       ],
       "run_at": "document_start"

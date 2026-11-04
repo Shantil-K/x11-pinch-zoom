@@ -91,11 +91,24 @@ The config it installs is [`touchegg/touchegg.conf`](touchegg/touchegg.conf):
 
 Step size is set by `action_execute_threshold`.
 
+#### Custom shortcuts
+
+Ctrl + Alt + ↑ / ↓ clashes with workspace switching on some desktops (Cinnamon, GNOME). To use different keys, open the extension popup, click the **Zoom in** or **Zoom out** shortcut and press the new combination (it must include Ctrl, Alt or Super).
+
+- **Native helper installed:** the popup sends the new keys to the helper, which rewrites the Touchégg config to press them. Nothing else to do. The helper also re-syncs the config each time it starts.
+- **No helper:** the popup shows a command to run, for example:
+  ```bash
+  ./switch-method.sh keys Control_L+Shift_L Up Control_L+Shift_L Down
+  ```
+  Modifiers are `Control_L`, `Alt_L`, `Shift_L`, `Super_L`, joined with `+`.
+
+If both shortcuts use the same modifiers, reversing direction mid-pinch works. Touchégg can't change modifiers mid-gesture, so with different modifiers each pinch only zooms one way.
+
 ### Switching methods
 
 ```bash
 ./switch-method.sh native   # native helper (continuous)
-./switch-method.sh keys     # Touchégg key presses
+./switch-method.sh keys     # Touchégg key presses (your saved shortcuts)
 ```
 
 The script swaps `~/.config/touchegg/touchegg.conf` (backing up the old one as `touchegg.conf.bak`), tells the helper whether to act, and starts the Touchégg client if it isn't running. Touchégg reloads its config on its own, and the change applies from the next pinch; no browser restart needed.
@@ -130,7 +143,7 @@ The script swaps `~/.config/touchegg/touchegg.conf` (backing up the old one as `
 ## Settings & Options
 
 Click the extension icon in your Chrome toolbar (or right-click and choose **Options**) to configure:
-- **Touchégg pinch keys (Ctrl + Alt + Up/Down)** *(default: enabled)*
+- **Key zoom shortcuts** *(default: enabled, Ctrl + Alt + ↑ / ↓)*: click a shortcut to record a new one
 - **Enable SHIFT + scroll zoom** *(default: enabled)*
 - **Enable CTRL / Touchpad pinch** *(default: disabled)*
 - **Hide scrollbars when zooming** *(default: disabled)*

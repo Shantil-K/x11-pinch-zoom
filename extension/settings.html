@@ -173,6 +173,71 @@
       font-weight: 600;
       border: 1px solid var(--border);
     }
+
+    .shortcuts {
+      margin: -2px 0 12px;
+      padding: 10px 12px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .sc-btn {
+      min-width: 150px;
+      padding: 5px 8px;
+      font: inherit;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .sc-btn:hover { border-color: var(--accent); }
+
+    .sc-btn.recording {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .sc-footer {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .sc-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex: 1;
+    }
+
+    .sc-status.error { color: #dc2626; }
+
+    .sc-status code {
+      font-size: 10.5px;
+      user-select: text;
+    }
+
+    .sc-link {
+      font: inherit;
+      font-size: 11px;
+      color: var(--accent);
+      background: none;
+      border: none;
+      cursor: pointer;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -185,11 +250,26 @@
   <div class="section">
     <label class="setting-item" for="mtzoom_keyzoom">
       <div class="setting-text">
-        <div class="setting-title">Touchégg pinch keys (Ctrl + Alt + Up/Down)</div>
-        <div class="setting-desc">Lag-free native key zoom for Touchégg pinch gestures</div>
+        <div class="setting-title">Key zoom shortcuts</div>
+        <div class="setting-desc">Zoom with the keys below. Touchégg presses them for pinch (keys method)</div>
       </div>
       <input type="checkbox" id="mtzoom_keyzoom">
     </label>
+
+    <div class="shortcuts">
+      <div class="shortcut-row">
+        <span>Zoom in</span>
+        <button class="sc-btn" id="sc_in" title="Click, then press the new shortcut"></button>
+      </div>
+      <div class="shortcut-row">
+        <span>Zoom out</span>
+        <button class="sc-btn" id="sc_out" title="Click, then press the new shortcut"></button>
+      </div>
+      <div class="sc-footer">
+        <div class="sc-status" id="sc_status">Click a shortcut to change it.</div>
+        <button class="sc-link" id="sc_reset">Reset</button>
+      </div>
+    </div>
 
     <label class="setting-item" for="mtzoom_shiftkey">
       <div class="setting-text">
@@ -232,7 +312,7 @@
     <div class="guide-title">Supported Inputs:</div>
     <div class="guide-item">
       <span>🤏</span>
-      <span><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> (Touchégg pinch)</span>
+      <span id="guide_keys"><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>↑</kbd> / <kbd>↓</kbd> (Touchégg pinch)</span>
     </div>
     <div class="guide-item">
       <span>🔍</span>
@@ -248,6 +328,7 @@
     </div>
   </div>
 
+  <script src="shortcuts.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>
