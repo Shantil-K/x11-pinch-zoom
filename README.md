@@ -1,10 +1,12 @@
-# Multi-touch Zoom (Chrome Manifest V3)
+# X11 Pinch Zoom
 
-A Google Chrome extension that enables smooth, multi-touch pinch to zoom and Shift + scroll zooming on desktop.
+Smooth, continuous touchpad **pinch-to-zoom** for Chromium-based browsers (Chrome, Opera / Opera GX, Brave, Chromium) on **Linux X11**.
 
-Migrated to **Manifest V3** for full compatibility with current and future versions of Google Chrome. Includes native key simulation support for **Touchégg** on Linux.
+On Wayland these browsers get pinch gestures natively. On X11 they don't: a pinch either does nothing or turns into stepped, jumpy page zoom. This project bridges that gap with a browser extension plus a small helper that forwards the touchpad pinch from [Touchégg](https://github.com/JoseExposito/touchegg), so the page zooms with your fingers like it does on macOS or Wayland.
 
-Based on [firefox-multi-touch-zoom](https://github.com/haxiomic/firefox-multi-touch-zoom) by George Corney and forks by NayamAmarshe & Marwane.
+It also gives every platform smooth Shift + scroll zoom.
+
+Based on [firefox-multi-touch-zoom](https://github.com/haxiomic/firefox-multi-touch-zoom) by George Corney and the Chrome forks by NayamAmarshe, Marwane and Damianoux. Migrated to Manifest V3.
 
 ---
 
@@ -28,8 +30,8 @@ On X11, Chrome and Opera don't receive touchpad pinch gestures themselves, so so
 ### Quick install
 
 ```bash
-git clone https://github.com/Shantil-K/chrome-multi-touch-zoom.git
-cd chrome-multi-touch-zoom
+git clone https://github.com/Shantil-K/x11-pinch-zoom.git
+cd x11-pinch-zoom
 ./install.sh
 ```
 
@@ -119,7 +121,7 @@ The script swaps `~/.config/touchegg/touchegg.conf` (backing up the old one as `
 
 1. Clone this repository or download the ZIP:
    ```bash
-   git clone https://github.com/Shantil-K/chrome-multi-touch-zoom.git
+   git clone https://github.com/Shantil-K/x11-pinch-zoom.git
    ```
 2. Open Google Chrome and navigate to `chrome://extensions/`
 3. Enable **Developer mode** using the toggle switch in the top-right corner.
@@ -142,12 +144,69 @@ The script swaps `~/.config/touchegg/touchegg.conf` (backing up the old one as `
 
 ## Settings & Options
 
-Click the extension icon in your Chrome toolbar (or right-click and choose **Options**) to configure:
+Click the extension icon in your browser toolbar (or right-click and choose **Options**) to configure:
 - **Key zoom shortcuts** *(default: enabled, Ctrl + Alt + ↑ / ↓)*: click a shortcut to record a new one
 - **Enable SHIFT + scroll zoom** *(default: enabled)*
 - **Enable CTRL / Touchpad pinch** *(default: disabled)*
 - **Hide scrollbars when zooming** *(default: disabled)*
 - **Zoom speed slider** *(default: 0.7x, range: 0.1x to 3.0x)*
+
+---
+
+## How It Works
+
+```
+ touchpad ──► libinput ──► Touchégg daemon (root, already running)
+                                │  D-Bus broadcast: pinch begin / update / end + amount
+                                ▼
+                    native-host/pinch_host.py   (started by the browser, runs as you)
+                                │  native messaging (stdin/stdout JSON)
+                                ▼
+                    extension/background.js     (finds the active tab of the focused window)
+                                │  chrome.tabs.sendMessage
+                                ▼
+                    extension/pinch-zoom.js     (scales the page with a CSS transform)
+```
+
+- **Zooming the page.** The content script scales `<html>` with a CSS transform anchored at the mouse pointer, and adjusts scroll position so the point under the cursor stays put. While the scale is changing it uses a cheap `perspective/translateZ` transform, then swaps to a sharp `scale()` 40 ms after movement stops.
+- **Continuous pinch (native helper).** Touchégg's daemon already reads the touchpad as root and broadcasts every gesture on a private D-Bus socket (`unix:abstract=touchegg`). The helper subscribes to it like any Touchégg client would, converts the pinch percentage into a scale factor relative to the start of the gesture, and passes it to the extension at ~140 updates/s. The page applies at most one update per animation frame.
+- **Key method.** Touchégg presses a keyboard shortcut for every pinch step (`SEND_KEYS`), and the extension animates each step over a few frames so it glides.
+- **Shortcuts.** Recorded in the popup, stored in extension storage, and sent to the helper, which writes the matching Touchégg config.
+
+---
+
+## Problems Faced and How They Were Solved
+
+| Problem | What was going on | Solution |
+|---|---|---|
+| Zoom only worked on some sites (e.g. GitHub) | The listeners ran in the bubble phase, after the page's own handlers. Many sites stop or cancel wheel/key events first. | Listen in the **capture phase** on `window`, so the extension sees events before the page. |
+| Shift + scroll did nothing in Chromium on Linux | Chromium turns Shift + wheel into horizontal scrolling, so `deltaY` is 0 and the value is in `deltaX`. | Fall back to `deltaX` when `deltaY` is 0. |
+| Nothing at all on Google / Bing in Opera | Opera refuses to inject extensions into search result pages. Confirmed by listing the page's script contexts over the DevTools protocol: only Opera's built-in extensions were present. | Can't be fixed from an extension. Documented, plus the Opera setting where it exists. |
+| Pinch via `xdotool` felt laggy and jumpy | Touchégg started a new `xdotool` process for every step, and each fake click was a full wheel notch applied instantly. | Use Touchégg's built-in `SEND_KEYS` (no process spawn) and **animate discrete steps** (ease-out over ~0.3 s). |
+| Chrome on X11 never receives pinch | Recorded the X server with `xinput test-xi2`: a pinch produced no gesture events for apps, and Chrome's X11 backend doesn't consume XInput 2.4 gestures. Wayland was not an option on the test laptop. | Bridge the gesture from outside the browser. |
+| Reading the touchpad directly needs root or the `input` group | `/dev/input` isn't readable by normal users. | Listen to the **Touchégg daemon's D-Bus broadcast** instead: it already has access and publishes continuous pinch amounts. No sudo needed. |
+| Gestures reach the helper even when another app is focused | The helper sees every pinch system-wide. | The background script only acts if a browser window is focused, and targets that window's active tab. |
+| First pinch updates could be lost | Looking up the focused tab is async, and updates arrived meanwhile. | Chain every message of a gesture on the same promise so they are delivered in order once the tab is known. |
+| MV3 service worker goes to sleep | Chrome stops idle background workers. | An open native-messaging port keeps it alive; pages also ping it on load so it reconnects if it was stopped. |
+| Both methods active = double zoom | Touchégg key presses and the helper reacting to the same pinch. | `switch-method.sh` swaps the Touchégg config and writes a state file the helper checks at the start of each gesture. |
+| Ctrl + Alt + arrows clash with workspace switching | Default shortcut used by Cinnamon / GNOME. | **Customizable shortcuts** in the popup; the helper regenerates the Touchégg config to match. |
+| Touchégg can't change modifiers when reversing mid-pinch | `SEND_KEYS` has `decreaseKeys` but no `decreaseModifiers`. | Reversal is enabled only when both shortcuts share the same modifiers. |
+| Helper must know the extension ID | Unpacked extensions get an ID derived from their folder path. | `install.sh` computes the ID the same way Chrome does (SHA-256 of the path, mapped to `a-p`). |
+| Automated testing in Chrome | Recent Chrome ignores `--load-extension`. | Load the extension through the DevTools protocol (`Extensions.loadUnpacked` with `--remote-debugging-pipe --enable-unsafe-extension-debugging`) and drive pages from scripts. |
+
+---
+
+## Drawbacks and Limitations
+
+- **Linux X11 + Touchégg only** for pinch. The helper relies on the Touchégg daemon (tested with v2.0.16). Its D-Bus signals aren't a formal public API, so a future Touchégg release could change them.
+- **Visual zoom, not reflow.** The page is scaled like an image; text doesn't re-wrap. `position: fixed` / sticky elements, full-screen web apps and pages that scroll an inner container instead of the whole document may look or pan oddly while zoomed.
+- **Brief softness while zooming.** A cheaper transform is used during movement, and the page sharpens ~40 ms after it stops.
+- **Pages the browser protects:** no zoom on `chrome://` / `opera://` pages, the Web Store, the new-tab page, or Google / Bing results in Opera.
+- **Tabs opened before installing** need a reload before the extension works in them.
+- **Main frame only.** Pinch is applied to the top-level page, not separately inside iframes.
+- **The folder must stay put.** The browser runs the helper from the cloned folder, and the extension ID depends on its path. If you move it, run `./install.sh` again.
+- **Approximate scale.** Touchégg reports pinch progress as a percentage, which is mapped to a scale factor. It feels 1:1 at the default speed but isn't the raw libinput scale.
+- **Key method is stepwise.** It's smoothed, but it can't follow the fingers precisely, and the shortcuts are also normal keyboard shortcuts on every page.
 
 ---
 
