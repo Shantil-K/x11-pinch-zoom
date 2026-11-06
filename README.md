@@ -197,7 +197,7 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
 | View snapped to a different spot after lifting the fingers | The cheap `perspective/translateZ` preview transform didn't land exactly where the final `scale()` did. | Use the same `scale()` throughout. |
 | Sticky bars (GitHub's README / License tabs) slid down while zoomed | The browser positions sticky elements in unzoomed pixels. | While zoomed, sticky elements are switched to `position: relative` (same layout, no sticking) and restored at 100 %. |
 | Jump back, then drift to the left edge after pinching on GitHub | GitHub sets `scroll-behavior: smooth`, so setting the scroll position animated, and setting top cancelled the left scroll. Found by replaying a pinch in headless Chrome and logging the point under the cursor each frame. | Force `scroll-behavior: auto` while zoomed and set both scroll axes in one `scrollTo({ behavior: 'instant' })`. |
-| Panning while zoomed went the wrong way (clockwise moved anticlockwise) | With the Synaptics touchpad driver, Cinnamon's natural scrolling only reverses vertical scrolling, so the two axes disagreed. Not an extension bug. | `xinput set-prop <touchpad> "Synaptics Scrolling Distance" -80 -80` (see Troubleshooting). |
+| Panning while zoomed went the wrong way (clockwise moved anticlockwise) | With the Synaptics touchpad driver, Cinnamon's natural scrolling only reverses vertical scrolling, so the two axes disagreed. Not an extension bug. | `xinput set-prop <touchpad> "Synaptics Scrolling Distance" -80 -80` (see [Troubleshooting](#troubleshooting)). |
 | Automated testing in Chrome | Recent Chrome ignores `--load-extension`. | Load the extension through the DevTools protocol (`Extensions.loadUnpacked` with `--remote-debugging-pipe --enable-unsafe-extension-debugging`) and drive pages from scripts. |
 
 ---
@@ -219,7 +219,37 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
 
 ## Troubleshooting
 
-- **Panning while zoomed goes the wrong way on one axis** (e.g. circling clockwise moves the page anticlockwise): your touchpad uses the Synaptics driver, where Cinnamon's natural scrolling only reverses vertical scrolling. Check with `xinput list-props <touchpad> | grep "Scrolling Distance"`; if one value is negative and the other positive, make them match: `xinput set-prop <touchpad> "Synaptics Scrolling Distance" -80 -80`. This resets at logout, so add it to your startup applications to keep it.
+- **Panning while zoomed goes the wrong way on one axis** (e.g. circling your fingers clockwise moves the page anticlockwise). This happens with the Synaptics touchpad driver: Cinnamon's natural scrolling only reverses up/down scrolling there, so left/right goes the opposite way. It's a touchpad setting, not an extension bug. To fix it:
+
+  1. Find your touchpad's name:
+     ```bash
+     xinput list | grep -i touchpad
+     ```
+     e.g. `DELL0949:00 04F3:30CB Touchpad`. Use your own name in the commands below.
+  2. Check the scroll setting:
+     ```bash
+     xinput list-props 'DELL0949:00 04F3:30CB Touchpad' | grep "Scrolling Distance"
+     ```
+     `Synaptics Scrolling Distance (347): -80, 80` means up/down is reversed (natural) but left/right isn't. If there's no `Synaptics` line, your touchpad uses libinput and this isn't the problem.
+  3. Make both numbers match. Both negative = natural scrolling, both positive = traditional. Keep the size of your numbers (80 here):
+     ```bash
+     xinput set-prop 'DELL0949:00 04F3:30CB Touchpad' 'Synaptics Scrolling Distance' -80 -80
+     ```
+     Try panning while zoomed; it should now follow your fingers on both axes.
+  4. This resets when you log out. To apply it at every login, open **Startup Applications** (Cinnamon menu), click **+** → **Custom command**, name it e.g. "Touchpad scroll fix", and use this as the command:
+     ```bash
+     sh -c "sleep 4; xinput set-prop 'DELL0949:00 04F3:30CB Touchpad' 'Synaptics Scrolling Distance' -80 -80"
+     ```
+     The `sleep 4` lets the desktop finish applying its own touchpad settings first, so they don't overwrite this one.
+
+     On other desktops, create `~/.config/autostart/touchpad-scroll-fix.desktop` instead:
+     ```ini
+     [Desktop Entry]
+     Type=Application
+     Name=Touchpad scroll fix
+     Exec=sh -c "sleep 4; xinput set-prop 'DELL0949:00 04F3:30CB Touchpad' 'Synaptics Scrolling Distance' -80 -80"
+     ```
+     If you later toggle natural scrolling in the desktop's settings, it may undo this until you log in again.
 - **Doesn't work on a tab that was already open:** extensions only load into pages opened after install or reload. Refresh the tab.
 - **Doesn't work on Google / Bing search in Opera:** Opera blocks extensions on search results pages. Some Opera builds have an **Allow access to search page results** switch on the extension's details page; if yours doesn't, use the browser's own zoom there.
 - **Doesn't work on browser pages** (`chrome://`, `opera://`, the Web Store, the start page): browsers don't allow extensions there.
