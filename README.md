@@ -168,8 +168,9 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
                     extension/pinch-zoom.js     (scales the page with a CSS transform)
 ```
 
-- **Zooming the page.** The content script scales `<html>` with a CSS transform anchored at the mouse pointer, and adjusts scroll position so the point under the cursor stays put. While the scale is changing it uses a cheap `perspective/translateZ` transform, then swaps to a sharp `scale()` 40 ms after movement stops.
-- **Continuous pinch (native helper).** Touchégg's daemon already reads the touchpad as root and broadcasts every gesture on a private D-Bus socket (`unix:abstract=touchegg`). The helper subscribes to it like any Touchégg client would, converts the pinch percentage into a scale factor relative to the start of the gesture, and passes it to the extension at ~140 updates/s. The page applies at most one update per animation frame.
+- **Zooming the page.** The content script scales `<html>` with a CSS transform anchored at the mouse pointer, and adjusts scroll position so the point under the cursor stays put. While zooming, `will-change: transform` makes the browser stretch the existing image instead of re-rendering at every zoom step; it's removed 40 ms after movement stops for one sharp re-render.
+- **Live pinch.** During a pinch only the transform changes: `translate(...) scale(...)`, where the translate stands in for scrolling. That stays on the GPU (no layout, no scroll writes per frame). When the pinch settles, the translate is swapped for the real scroll position in the same frame.
+- **Continuous pinch (native helper).** Touchégg's daemon already reads the touchpad as root and broadcasts every gesture on a private D-Bus socket (`unix:abstract=touchegg`). The helper subscribes to it like any Touchégg client would, converts the pinch percentage into a scale factor relative to the start of the gesture, and passes it to the extension at ~140 updates/s. Touchégg's samples are uneven, so the page eases toward the latest pinch scale each frame (~35 ms smoothing) instead of jumping to each sample.
 - **Key method.** Touchégg presses a keyboard shortcut for every pinch step (`SEND_KEYS`), and the extension animates each step over a few frames so it glides.
 - **Shortcuts.** Recorded in the popup, stored in extension storage, and sent to the helper, which writes the matching Touchégg config.
 
@@ -192,6 +193,11 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
 | Ctrl + Alt + arrows clash with workspace switching | Default shortcut used by Cinnamon / GNOME. | **Customizable shortcuts** in the popup; the helper regenerates the Touchégg config to match. |
 | Touchégg can't change modifiers when reversing mid-pinch | `SEND_KEYS` has `decreaseKeys` but no `decreaseModifiers`. | Reversal is enabled only when both shortcuts share the same modifiers. |
 | Helper must know the extension ID | Unpacked extensions get an ID derived from their folder path. | `install.sh` computes the ID the same way Chrome does (SHA-256 of the path, mapped to `a-p`). |
+| Pinch stuttered | Touchégg's pinch steps are uneven (0.2–1.2 % per 7 ms sample), and the browser re-rendered the page at each new zoom level. | Ease toward the latest sample every frame, and set `will-change: transform` while zooming so the page is only re-rendered once, at the end. |
+| View snapped to a different spot after lifting the fingers | The cheap `perspective/translateZ` preview transform didn't land exactly where the final `scale()` did. | Use the same `scale()` throughout. |
+| Sticky bars (GitHub's README / License tabs) slid down while zoomed | The browser positions sticky elements in unzoomed pixels. | While zoomed, sticky elements are switched to `position: relative` (same layout, no sticking) and restored at 100 %. |
+| Jump back, then drift to the left edge after pinching on GitHub | GitHub sets `scroll-behavior: smooth`, so setting the scroll position animated, and setting top cancelled the left scroll. Found by replaying a pinch in headless Chrome and logging the point under the cursor each frame. | Force `scroll-behavior: auto` while zoomed and set both scroll axes in one `scrollTo({ behavior: 'instant' })`. |
+| Panning while zoomed went the wrong way (clockwise moved anticlockwise) | With the Synaptics touchpad driver, Cinnamon's natural scrolling only reverses vertical scrolling, so the two axes disagreed. Not an extension bug. | `xinput set-prop <touchpad> "Synaptics Scrolling Distance" -80 -80` (see Troubleshooting). |
 | Automated testing in Chrome | Recent Chrome ignores `--load-extension`. | Load the extension through the DevTools protocol (`Extensions.loadUnpacked` with `--remote-debugging-pipe --enable-unsafe-extension-debugging`) and drive pages from scripts. |
 
 ---
@@ -199,8 +205,9 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
 ## Drawbacks and Limitations
 
 - **Linux X11 + Touchégg only** for pinch. The helper relies on the Touchégg daemon (tested with v2.0.16). Its D-Bus signals aren't a formal public API, so a future Touchégg release could change them.
-- **Visual zoom, not reflow.** The page is scaled like an image; text doesn't re-wrap. `position: fixed` / sticky elements, full-screen web apps and pages that scroll an inner container instead of the whole document may look or pan oddly while zoomed.
-- **Brief softness while zooming.** A cheaper transform is used during movement, and the page sharpens ~40 ms after it stops.
+- **Visual zoom, not reflow.** The page is scaled like an image; text doesn't re-wrap. `position: fixed` elements, full-screen web apps and pages that scroll an inner container instead of the whole document may look or pan oddly while zoomed.
+- **Brief softness while zooming.** The page is stretched rather than re-rendered during movement, and sharpens ~40 ms after it stops.
+- **Sticky elements don't stick while zoomed.** They sit in place like normal content until zoom returns to 100 %.
 - **Pages the browser protects:** no zoom on `chrome://` / `opera://` pages, the Web Store, the new-tab page, or Google / Bing results in Opera.
 - **Tabs opened before installing** need a reload before the extension works in them.
 - **Main frame only.** Pinch is applied to the top-level page, not separately inside iframes.
@@ -212,6 +219,7 @@ Click the extension icon in your browser toolbar (or right-click and choose **Op
 
 ## Troubleshooting
 
+- **Panning while zoomed goes the wrong way on one axis** (e.g. circling clockwise moves the page anticlockwise): your touchpad uses the Synaptics driver, where Cinnamon's natural scrolling only reverses vertical scrolling. Check with `xinput list-props <touchpad> | grep "Scrolling Distance"`; if one value is negative and the other positive, make them match: `xinput set-prop <touchpad> "Synaptics Scrolling Distance" -80 -80`. This resets at logout, so add it to your startup applications to keep it.
 - **Doesn't work on a tab that was already open:** extensions only load into pages opened after install or reload. Refresh the tab.
 - **Doesn't work on Google / Bing search in Opera:** Opera blocks extensions on search results pages. Some Opera builds have an **Allow access to search page results** switch on the extension's details page; if yours doesn't, use the browser's own zoom there.
 - **Doesn't work on browser pages** (`chrome://`, `opera://`, the Web Store, the start page): browsers don't allow extensions there.

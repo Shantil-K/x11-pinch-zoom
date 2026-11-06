@@ -133,6 +133,7 @@ let smoothY = 0;
 let smoothFrame = null;
 
 function smoothZoom(scaleBy, x, y) {
+  endPinchNow();
   let base = targetScale != null ? targetScale : pageScale;
   targetScale = Math.min(Math.max(base * scaleBy, minScale), maxScale);
   smoothX = x;
@@ -158,20 +159,123 @@ function cancelSmoothZoom() {
   targetScale = null;
 }
 
-// Continuous pinch from the native helper (see native-host/), relayed by background.js
+// Continuous pinch from the native helper (see native-host/), relayed by background.js.
+// Touchégg's samples are uneven and arrive in bursts, so instead of jumping to each
+// one, the page eases toward the latest pinch scale every frame.
+const pinchSmoothing_ms = 35; // higher = smoother but laggier
 let pinchStartScale = 1;
 let pinchX = 0;
 let pinchY = 0;
-let pinchLatest = null;
+let pinchTarget = null;
+let pinchActive = false; // fingers still down: keep the fast low-quality rendering
 let pinchFrame = null;
+let pinchLastTime = 0;
 
-function applyPinchFrame() {
+function pinchStep(now) {
+  let dt = Math.min(Math.max(now - pinchLastTime, 0), 50);
+  pinchLastTime = now;
+  let remaining = pinchTarget / pageScale;
+  if (!pinchActive && Math.abs(remaining - 1) < 0.001) {
+    setLiveScale(pinchTarget);
+    commitLive(); // also schedules the sharp re-render
+    cancelPinch();
+    return;
+  }
+  if (Math.abs(remaining - 1) > 0.0001) {
+    setLiveScale(pageScale * Math.pow(remaining, 1 - Math.exp(-dt / pinchSmoothing_ms)));
+  }
+  pinchFrame = requestAnimationFrame(pinchStep);
+}
+
+function cancelPinch() {
+  if (pinchFrame != null) cancelAnimationFrame(pinchFrame);
   pinchFrame = null;
-  if (pinchLatest == null) return;
-  // the speed slider bends the response: 0.7 (default) = follow fingers 1:1
-  let target = pinchStartScale * Math.pow(pinchLatest, pinchZoomSpeed / 0.7);
-  pinchLatest = null;
-  applyScale(target / pageScale, pinchX, pinchY);
+  pinchTarget = null;
+  pinchActive = false;
+  live = null;
+  liveOffsetX = 0;
+  liveOffsetY = 0;
+}
+
+// Finish a pinch right away (e.g. when wheel or key zoom takes over)
+function endPinchNow() {
+  if (pinchFrame == null && !live) return;
+  commitLive();
+  cancelPinch();
+}
+
+// "Live" pinch: while zooming, only the page's CSS transform changes (scale plus a
+// shift that stands in for scrolling). That stays on the GPU: no layout, no scroll
+// changes. The real scroll position is set once, when the pinch finishes.
+let live = null;
+let liveOffsetX = 0;
+let liveOffsetY = 0;
+
+function beginLive() {
+  let sb = getScrollBoxElement();
+  let s0 = pageScale;
+  let ox = horizontalOriginShift, oy = verticalOriginShift;
+  live = {
+    s0, ox, oy,
+    sx0: sb.scrollLeft,
+    sy0: sb.scrollTop,
+    zx: pinchX,
+    zy: pinchY,
+    // unscaled page size, so the scroll limits can be worked out for any zoom
+    w: ox + (sb.scrollWidth - ox) / s0,
+    h: oy + (sb.scrollHeight - oy) / s0,
+    cw: sb.clientWidth,
+    ch: sb.clientHeight
+  };
+}
+
+// Where the page would be scrolled at zoom s, keeping the pinch point still
+function liveScrollFor(s) {
+  let k = s / live.s0;
+  let sx = (live.sx0 + live.zx) * k - live.zx;
+  let sy = (live.sy0 + live.zy) * k - live.zy;
+  let maxX = Math.max(live.ox + (live.w - live.ox) * s - live.cw, 0);
+  let maxY = Math.max(live.oy + (live.h - live.oy) * s - live.ch, 0);
+  return [Math.min(Math.max(sx, 0), maxX), Math.min(Math.max(sy, 0), maxY)];
+}
+
+function setLiveScale(s) {
+  if (!live) beginLive();
+  pageScale = Math.min(Math.max(s, minScale), maxScale);
+  canFollowMouse = pageScale !== 1;
+  if (pageScale === 1) unpinStickyElements();
+  else pinStickyElements();
+  let [sx, sy] = liveScrollFor(pageScale);
+  liveOffsetX = live.sx0 - sx;
+  liveOffsetY = live.sy0 - sy;
+  updateTransform(null, null);
+}
+
+function commitLive() {
+  if (!live) return;
+  let sb = getScrollBoxElement();
+  // keep any scrolling done with the fingers during the pinch
+  let panX = sb.scrollLeft - live.sx0;
+  let panY = sb.scrollTop - live.sy0;
+  let [sx, sy] = liveScrollFor(pageScale);
+  live = null;
+  liveOffsetX = 0;
+  liveOffsetY = 0;
+  if (pageScale === 1) {
+    horizontalOriginShift = 0;
+    verticalOriginShift = 0;
+  }
+  updateTransform(null, null);
+  // transform and scroll change in the same frame, so the view doesn't move
+  let x = Math.min(Math.max(sx + panX, 0), Math.max(sb.scrollWidth - sb.clientWidth, 0));
+  let y = Math.min(Math.max(sy + panY, 0), Math.max(sb.scrollHeight - sb.clientHeight, 0));
+  translationX = -x;
+  translationY = -y;
+  overflowTranslationX = 0;
+  overflowTranslationY = 0;
+  sb.scrollTo({ left: x, top: y, behavior: 'instant' });
+  ignoredScrollLeft = sb.scrollLeft;
+  ignoredScrollTop = sb.scrollTop;
 }
 
 if (chrome.runtime && chrome.runtime.onMessage) {
@@ -179,14 +283,22 @@ if (chrome.runtime && chrome.runtime.onMessage) {
     if (!msg || !msg.mtzoomPinch) return;
     if (msg.mtzoomPinch === 'begin') {
       cancelSmoothZoom();
-      pinchStartScale = pageScale;
+      commitLive(); // a previous pinch still easing: settle it, this one continues from there
+      // chain onto a previous pinch that is still easing
+      pinchStartScale = pinchTarget != null ? pinchTarget : pageScale;
+      pinchActive = true;
       let scrollBox = getScrollBoxElement();
       pinchX = (mouseX != null ? mouseX : window.innerWidth / 2) - (scrollBox.offsetLeft || 0);
       pinchY = (mouseY != null ? mouseY : window.innerHeight / 2) - (scrollBox.offsetTop || 0);
     }
-    pinchLatest = msg.s;
-    // apply at most once per frame; the helper sends ~140 updates/s
-    if (pinchFrame == null) pinchFrame = requestAnimationFrame(applyPinchFrame);
+    // the speed slider bends the response: 0.7 (default) = follow fingers 1:1
+    let target = pinchStartScale * Math.pow(msg.s, pinchZoomSpeed / 0.7);
+    pinchTarget = Math.min(Math.max(target, minScale), maxScale);
+    if (msg.mtzoomPinch === 'end') pinchActive = false;
+    if (pinchFrame == null) {
+      pinchLastTime = performance.now();
+      pinchFrame = requestAnimationFrame(pinchStep);
+    }
   });
   try { chrome.runtime.sendMessage({ mtzoomWake: true }).catch(() => {}); } catch (e) {}
 }
@@ -221,6 +333,7 @@ window.addEventListener('keyup', (e) => {
 let ignoredScrollLeft = null;
 let ignoredScrollTop = null;
 function updateTranslationFromScroll() {
+  if (live) return; // mid-pinch scrolling is picked up when the pinch finishes
   let scrollBox = getScrollBoxElement();
   if (scrollBox.scrollLeft !== ignoredScrollLeft) {
     translationX = -scrollBox.scrollLeft;
@@ -259,6 +372,7 @@ window.addEventListener('wheel', (e) => {
       smoothZoom(scaleBy, x, y);
     } else {
       cancelSmoothZoom();
+      endPinchNow();
       applyScale(scaleBy, x, y);
     }
 
@@ -316,17 +430,21 @@ function updateTransform(scaleModeOverride, shouldDisableControl) {
   if (sm === 0 || alwaysHighQuality) {
     pageEl.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
   } else {
-    let p = 1;
-    let z = p - p / pageScale;
-
-    pageEl.style.setProperty('transform', `perspective(${p}px) translateZ(${z}px)`, 'important');
+    // Same scale as the final one, so the view doesn't jump when zooming stops.
+    // (The old perspective/translateZ trick landed in a slightly different spot.)
+    // During a live pinch the shift stands in for scrolling (see setLiveScale).
+    let shift = live ? `translate(${liveOffsetX}px, ${liveOffsetY}px) ` : '';
+    pageEl.style.setProperty('transform', `${shift}scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
+    // Without this the browser re-renders the whole page each time the zoom passes
+    // another sharpness step, which stutters. With it, it just stretches the
+    // current image until zooming stops (slightly soft meanwhile).
+    pageEl.style.setProperty('will-change', 'transform', 'important');
 
     window.clearTimeout(qualityTimeoutHandle);
-    qualityTimeoutHandle = setTimeout(function () {
+    // re-rendering sharp mid-pinch causes a visible hitch; wait until the fingers lift
+    if (!pinchActive) qualityTimeoutHandle = setTimeout(function () {
       let el = getPageElement();
-      if (el) {
-        el.style.setProperty('transform', `scaleX(${pageScale}) scaleY(${pageScale})`, 'important');
-      }
+      if (el) el.style.removeProperty('will-change'); // one sharp re-render at the final zoom
     }, highQualityWait_ms);
   }
 
@@ -334,6 +452,9 @@ function updateTransform(scaleModeOverride, shouldDisableControl) {
 
   pageEl.style.position = 'relative';
   pageEl.style.height = '100%';
+  // Pages like GitHub turn on smooth scrolling, which turns the zoom's scroll changes
+  // into slow glides (and setting left then top cancels the left one)
+  pageEl.style.setProperty('scroll-behavior', 'auto', 'important');
 
   if (minScale < 1) {
     pageEl.style.setProperty('left', `${Math.max(translationX, 0) - overflowTranslationX}px`, 'important');
@@ -393,8 +514,10 @@ function applyScale(scaleBy, x_scrollBoxElement, y_scrollBoxElement) {
     canFollowMouse = false;
     horizontalOriginShift = 0;
     verticalOriginShift = 0;
+    unpinStickyElements();
   } else {
     canFollowMouse = true;
+    pinStickyElements();
   }
 
   if (effectiveScale === 1) return;
@@ -416,8 +539,52 @@ function applyScale(scaleBy, x_scrollBoxElement, y_scrollBoxElement) {
   updateTransform(null, null);
 }
 
+// Sticky elements (e.g. GitHub's README/License tab bar) misbehave on a scaled page:
+// the browser works out where they stick in unzoomed pixels, so they slide down as
+// you zoom and pan. While zoomed, make them sit in place like normal content.
+// position: relative keeps the same layout, and clearing top/left/etc. stops offsets.
+const STICKY_PROPS = ['position', 'top', 'right', 'bottom', 'left'];
+let pinnedSticky = null; // [{ el, saved: [[prop, value, priority], ...] }]
+let stickyScanPending = false;
+
+function pinStickyElements() {
+  if (pinnedSticky || stickyScanPending) return;
+  stickyScanPending = true;
+  // scan when the browser is idle so the start of a pinch doesn't hitch
+  let scan = () => {
+    stickyScanPending = false;
+    if (pageScale === 1 || pinnedSticky) return;
+    pinnedSticky = [];
+    let root = document.body || document.documentElement;
+    if (!root) return;
+    let walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let el = walker.currentNode; el; el = walker.nextNode()) {
+      if (getComputedStyle(el).position !== 'sticky') continue;
+      let saved = STICKY_PROPS.map((p) => [p, el.style.getPropertyValue(p), el.style.getPropertyPriority(p)]);
+      pinnedSticky.push({ el, saved });
+      el.style.setProperty('position', 'relative', 'important');
+      for (let p of STICKY_PROPS.slice(1)) el.style.setProperty(p, 'auto', 'important');
+    }
+  };
+  if (window.requestIdleCallback) requestIdleCallback(scan, { timeout: 150 });
+  else setTimeout(scan, 0);
+}
+
+function unpinStickyElements() {
+  if (!pinnedSticky) return;
+  for (let { el, saved } of pinnedSticky) {
+    for (let [p, v, prio] of saved) {
+      if (v) el.style.setProperty(p, v, prio);
+      else el.style.removeProperty(p);
+    }
+  }
+  pinnedSticky = null;
+}
+
 function resetScale() {
   cancelSmoothZoom();
+  cancelPinch();
+  unpinStickyElements();
   pageScale = 1;
   translationX = 0;
   translationY = 0;
@@ -453,6 +620,8 @@ function resetScale() {
   let pageEl = getPageElement();
   if (pageEl) {
     pageEl.style.removeProperty('transform');
+    pageEl.style.removeProperty('will-change');
+    pageEl.style.removeProperty('scroll-behavior');
     pageEl.style.removeProperty('transform-origin');
     pageEl.style.removeProperty('position');
     pageEl.style.removeProperty('height');
